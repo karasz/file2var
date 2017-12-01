@@ -8,14 +8,49 @@ import (
 	"io"
 	"os"
 	"strings"
+	"text/template"
 )
 
 const BLOCK_SIZE = 4086
+
+const header = `//go:generate file2govar -p {{.Package}} {{.Filename}}
+
+package {{.Package}}
+
+import (
+	"bytes"
+	"compress/zlib"
+	"io"
+)
+
+const z_{{.Variable}} = []byte{
+`
+
+const footer = `}
+
+func {{.Variable}}() ([]byte, error) {
+	var in = bytes.NewReader(z_{{.Variable}})
+	var out bytes.Buffer
+	z, err := zlib.NewReader(&in)
+	if err != nil {
+		return nil, err
+	}
+	io.Copy(&out, z)
+	return out.Bytes(), nil
+}
+`
+
+type Data struct {
+	Package, Filename, Variable string
+}
 
 func main() {
 	pkgname := flag.String("p", "", "package name")
 
 	flag.Parse()
+
+	th := template.Must(template.New("header").Parse(header))
+	tf := template.Must(template.New("footer").Parse(footer))
 
 	for _, fname := range flag.Args() {
 		var buf bytes.Buffer
@@ -45,10 +80,9 @@ func main() {
 			}
 			z.Write(data[:n])
 		}
+		f.Close()
 		z.Flush()
 		z.Close()
-
-		f.Close()
 
 		// output file
 		f, err = os.Create(fname + ".go")
@@ -56,9 +90,16 @@ func main() {
 			panic(err)
 		}
 
-		fmt.Fprintf(f, "package %s\n\n//go:generate file2govar -p %s %s\n\n", *pkgname, *pkgname, fname)
-		fmt.Fprintf(f, "import (\n\t\"bytes\"\n\t\"io\"\n)\n\n")
-		fmt.Fprintf(f, "const z_%s = []byte{\n", varname)
+		d := Data{
+			Package:  *pkgname,
+			Filename: fname,
+			Variable: varname,
+		}
+
+		if err = th.Execute(f, d); err != nil {
+			panic(err)
+		}
+
 		for i, b := range buf.Bytes() {
 			var pre, post string
 			var col = i % 8
@@ -74,14 +115,11 @@ func main() {
 			}
 			fmt.Fprintf(f, "%s0x%02x%s", pre, b, post)
 		}
-		fmt.Fprintf(f, "}\n\n")
-		fmt.Fprintf(f, "func %s() ([]byte, error) {\n", varname)
-		fmt.Fprintf(f, "\tvar in = bytes.NewReader(z_%s)\n", varname)
-		fmt.Fprintf(f, "\tvar out bytes.Buffer\n")
-		fmt.Fprintf(f, "\tz, err := zlib.NewReader(&in)\n")
-		fmt.Fprintf(f, "\tif err != nil {\n\t\treturn nil, err\n\t}\n")
-		fmt.Fprintf(f, "\tio.Copy(&out, z)\n")
-		fmt.Fprintf(f, "\treturn out.Bytes(), nil\n}\n")
+
+		if err = tf.Execute(f, d); err != nil {
+			panic(err)
+		}
+
 		f.Close()
 	}
 }
