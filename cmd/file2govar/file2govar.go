@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"io"
@@ -17,11 +17,12 @@ const fileHeader = `package {{.Package}}
 
 import (
 	"bytes"
-	"compress/zlib"
+	"compress/gzip"
 	"io"
 )
 `
 const blockHeader = `
+// {{.Filename}}
 const z_{{.Variable}} = []byte{
 `
 
@@ -30,7 +31,7 @@ const blockFooter = `}
 func {{.Variable}}() ([]byte, error) {
 	var in = bytes.NewReader(z_{{.Variable}})
 	var out bytes.Buffer
-	z, err := zlib.NewReader(&in)
+	z, err := gzip.NewReader(&in)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +125,7 @@ func main() {
 		}
 
 		// compress
-		z, err := zlib.NewWriterLevel(&buf, zlib.BestCompression)
+		z, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 		if err != nil {
 			panic(err)
 		}
