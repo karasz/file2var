@@ -13,20 +13,19 @@ import (
 
 const BLOCK_SIZE = 4086
 
-const header = `//go:generate file2govar -p {{.Package}} {{.Filename}}
-
-package {{.Package}}
+const fileHeader = `package {{.Package}}
 
 import (
 	"bytes"
 	"compress/zlib"
 	"io"
 )
-
+`
+const blockHeader = `
 const z_{{.Variable}} = []byte{
 `
 
-const footer = `}
+const blockFooter = `}
 
 func {{.Variable}}() ([]byte, error) {
 	var in = bytes.NewReader(z_{{.Variable}})
@@ -40,21 +39,83 @@ func {{.Variable}}() ([]byte, error) {
 }
 `
 
+type Config struct {
+	Package string
+	Output  string
+
+	noGoGenerate bool
+	append       bool
+}
+
+type Header struct {
+	Package string
+}
+
 type Data struct {
-	Package, Filename, Variable string
+	Variable, Filename string
 }
 
 func main() {
-	pkgname := flag.String("p", "", "package name")
+	var fout *os.File
+	var err error
+
+	c := &Config{}
+
+	flag.StringVar(&c.Package, "p", "", "package name")
+	flag.StringVar(&c.Output, "o", "", "output file")
+
+	flag.BoolVar(&c.noGoGenerate, "G", false, "omit //go:generate")
+	flag.BoolVar(&c.append, "a", false, "append to existing file")
 
 	flag.Parse()
 
-	th := template.Must(template.New("header").Parse(header))
-	tf := template.Must(template.New("footer").Parse(footer))
+	// per-output
+	h := Header{
+		Package: c.Package,
+	}
+	th0 := template.Must(template.New("header").Parse(fileHeader))
+
+	// per-input
+	th1 := template.Must(template.New("block_header").Parse(blockHeader))
+	tf1 := template.Must(template.New("block_footer").Parse(blockFooter))
+
+	if len(c.Output) > 0 {
+		// single output
+		flags := os.O_CREATE | os.O_WRONLY
+		if c.append {
+			flags |= os.O_APPEND
+		}
+
+		fout, err = os.OpenFile(c.Output, flags, 0644)
+		if err != nil {
+			panic(err)
+		}
+
+		if !c.noGoGenerate {
+			var s []string
+			s = append(s, fmt.Sprintf("//go:generate %s -p %s -o %s", os.Args[3], h.Package, c.Output))
+			if c.append {
+				s = append(s, "-a")
+			}
+			for _, fname := range flag.Args() {
+				s = append(s, fname)
+			}
+			fout.WriteString(strings.Join(s, " "))
+			fout.WriteString("\n\n")
+		}
+
+		if err = th0.Execute(fout, h); err != nil {
+			panic(err)
+		}
+	}
 
 	for _, fname := range flag.Args() {
 		var buf bytes.Buffer
-		var varname = strings.Replace(fname, ".", "_", -1)
+		var varname = fname
+
+		varname = strings.Replace(varname, ".", "_", -1)
+		varname = strings.Replace(varname, "/", "_", -1)
+		varname = strings.Replace(varname, "-", "_", -1)
 
 		// input file
 		f, err := os.Open(fname)
@@ -85,18 +146,44 @@ func main() {
 		z.Close()
 
 		// output file
-		f, err = os.Create(fname + ".go")
-		if err != nil {
-			panic(err)
+		if len(c.Output) == 0 {
+			outname := fname + ".go"
+			flags := os.O_CREATE | os.O_WRONLY
+			if c.append {
+				flags |= os.O_APPEND
+			}
+
+			if fout != nil {
+				fout.Close()
+			}
+
+			fout, err = os.OpenFile(outname, flags, 0644)
+			if err != nil {
+				panic(err)
+			}
+
+			if !c.noGoGenerate {
+				var s []string
+				s = append(s, fmt.Sprintf("//go:generate %s -p %s", os.Args[0], h.Package))
+				if c.append {
+					s = append(s, "-a")
+				}
+				s = append(s, fname)
+				fout.WriteString(strings.Join(s, " "))
+				fout.WriteString("\n\n")
+			}
+
+			if err = th0.Execute(fout, h); err != nil {
+				panic(err)
+			}
 		}
 
 		d := Data{
-			Package:  *pkgname,
 			Filename: fname,
 			Variable: varname,
 		}
 
-		if err = th.Execute(f, d); err != nil {
+		if err = th1.Execute(fout, d); err != nil {
 			panic(err)
 		}
 
@@ -113,13 +200,15 @@ func main() {
 			} else {
 				pre = ", "
 			}
-			fmt.Fprintf(f, "%s0x%02x%s", pre, b, post)
+			fmt.Fprintf(fout, "%s0x%02x%s", pre, b, post)
 		}
 
-		if err = tf.Execute(f, d); err != nil {
+		if err = tf1.Execute(fout, d); err != nil {
 			panic(err)
 		}
+	}
 
-		f.Close()
+	if fout != nil {
+		fout.Close()
 	}
 }
