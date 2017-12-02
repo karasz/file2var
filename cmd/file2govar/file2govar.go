@@ -28,10 +28,10 @@ var z_{{.Variable}} = []byte{
 
 const blockFooter = `}
 
-func {{.Variable}}() ([]byte, error) {
+func x_{{.Variable}}() ([]byte, error) {
 	var in = bytes.NewReader(z_{{.Variable}})
 	var out bytes.Buffer
-	z, err := gzip.NewReader(&in)
+	z, err := gzip.NewReader(in)
 	if err != nil {
 		return nil, err
 	}
