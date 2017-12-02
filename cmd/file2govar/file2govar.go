@@ -23,7 +23,7 @@ import (
 `
 const blockHeader = `
 // {{.Filename}}
-const z_{{.Variable}} = []byte{
+var z_{{.Variable}} = []byte{
 `
 
 const blockFooter = `}
