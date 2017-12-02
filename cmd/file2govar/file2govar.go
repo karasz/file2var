@@ -11,7 +11,7 @@ import (
 	"text/template"
 )
 
-const BLOCK_SIZE = 4086
+const BLOCK_SIZE = 4096
 
 const fileHeader = `package {{.Package}}
 
